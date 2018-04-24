@@ -1,0 +1,42 @@
+name:                nmea-ais
+version:             0.1.0.0
+github:              "githubuser/nmea-ais"
+license:             BSD3
+author:              "Archibald Neil MacDonald"
+maintainer:          "FortOyer@hotmail.co.uk"
+copyright:           "2018 Archibald Neil MacDonald"
+
+extra-source-files:
+- README.md
+- ChangeLog.md
+
+# Metadata used when publishing your package
+# synopsis:            Short description of your package
+# category:            Web
+
+# To avoid duplicated efforts in documentation and dealing with the
+# complications of embedding Haddock markup inside cabal files, it is
+# common to point users to the README.md file.
+description:         Please see the README on Github at <https://github.com/githubuser/nmea-ais#readme>
+
+dependencies:
+- base >= 4.7 && < 5
+- attoparsec
+- text
+- bytestring
+
+library:
+  source-dirs: src
+
+tests:
+  nmea-ais-test:
+    main:                Spec.hs
+    source-dirs:         test
+    ghc-options:
+    - -threaded
+    - -rtsopts
+    - -with-rtsopts=-N
+    dependencies:
+    - nmea-ais
+    - hspec
+    - hspec-attoparsec
