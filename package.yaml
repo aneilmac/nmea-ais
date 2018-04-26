@@ -24,6 +24,7 @@ dependencies:
 - attoparsec
 - text
 - bytestring
+- time
 
 library:
   source-dirs: src

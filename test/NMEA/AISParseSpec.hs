@@ -19,4 +19,6 @@ spec :: Spec
 spec = do
   describe "Parse a single AIS message" $ do
     it "Parses an AIS message" $ do
-      message ~> parseAIS `shouldParse` AIS AI A AISContent
+      message ~> parseAIS `shouldParse` AIS AI A 
+        (Raw "\SOH\ETX\CAN\US\EM\n\NUL \
+             \\NUL\NUL\NUL\NUL&\US\CAN\FS\DC36\CAN!\ESC?>\FS\NUL\ENQ\EM8")

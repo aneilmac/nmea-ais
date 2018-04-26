@@ -2,6 +2,7 @@
 module NMEA.AIS where
 
 import Data.Text
+import NMEA.AIS.PositionReportClassA
 
 data TalkerID = AB | AD | AI | AN | AR | AS | AT | AX | BS | SA deriving (Eq)
 
@@ -31,5 +32,6 @@ data AIS = AIS
   } deriving (Eq, Show)
 
 
-data AISContent = AISContent deriving (Eq, Show)
-
+data AISContent = Raw Text
+                | PosClassA PositionReportClassA
+                deriving (Eq, Show)
