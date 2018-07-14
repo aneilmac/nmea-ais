@@ -1,7 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 module NMEA.AIS where
 
-import Data.Text
+import Data.ByteString
 import NMEA.AIS.PositionReportClassA
 
 data TalkerID = AB | AD | AI | AN | AR | AS | AT | AX | BS | SA deriving (Eq)
@@ -20,10 +20,9 @@ instance Show TalkerID where
 
 data ChannelCode = A | B deriving (Eq, Show)
 
-mhz :: ChannelCode -> Text
+mhz :: ChannelCode -> String
 mhz A = "161.975Mhz (87B)"
 mhz B = "162.025Mhz (88B)"
-
 
 data AIS = AIS
   { talkerId :: TalkerID
@@ -32,6 +31,6 @@ data AIS = AIS
   } deriving (Eq, Show)
 
 
-data AISContent = Raw Text
+data AISContent = Raw ByteString
                 | PosClassA PositionReportClassA
                 deriving (Eq, Show)

@@ -1,31 +1,35 @@
 {-# LANGUAGE OverloadedStrings #-}
-module NMEA.AIS.Parse where
+module NMEA.AIS.Parse 
+  ( parseAIS
+  ) where
 
 import Prelude hiding (map, take, foldl, drop, head, length, repeat)
 import Control.Applicative ((<|>))
-import Data.Char (ord, chr)
-import Data.Attoparsec.Text.Lazy
-import Data.Text hiding (take, unfoldr)
-import Data.Bits (xor, shift, (.|.), (.&.))
-import Data.ByteString (ByteString, unfoldr)
-import Data.Word (Word8)
+import Data.Char (ord)
+import Data.Attoparsec.ByteString.Lazy
+import Data.Bits (bit, xor, (.|.), (.&.), complement)
+import qualified Data.ByteString as B
 import Text.Printf (printf)
 
 import NMEA.AIS
-import NMEA.AIS.ManeuverIndicator
-import NMEA.AIS.NavigationStatus
 import NMEA.AIS.PositionReportClassA
+import NMEA.AIS.Internal.Parse.ByteStringHelpers
+import NMEA.AIS.Internal.Parse.SixBits
 
 parseMessage :: Parser [AIS]
 parseMessage = do
   many' parseAIS
 
+decimal :: Integral a => Parser a
+decimal = B.foldl' step 0 `fmap` takeWhile1 isDecimal
+  where step a c = a * 10 + fromIntegral (fromEnum c - 48)
+
 parseAIS :: Parser AIS
-parseAIS = do 
+parseAIS = do
   char '!'
   (consumed, gen) <- match $ do
     talker <- decodeTalkerID
-    string "VDM" <|> "VDO"
+    string "VDM" <|> string "VDO"
     char ','
     sentanceCount <- decimal :: Parser Int
     char ','
@@ -46,21 +50,9 @@ parseAIS = do
      then return gen
      else fail $ printf "AIS Checksum mismatch. Expected %d, got %d." h chVal
 
-d6 :: Char -> Char
-d6 c = let c' = ord c - 48
-        in if c' > 40
-              then chr $ c' - 8
-              else chr c'
-{-# INLINE d6 #-}
-
--- | Decodes six-bit encoding. Subtracts 48 from the ASCII value, if the result
---   is greater than 40 then substracts 8.
-decodeSixBits :: Text -> Text
-decodeSixBits = map d6
-
 decodeTalkerID :: Parser TalkerID
 decodeTalkerID = matchTalker <$> take 2
-  where matchTalker :: Text -> TalkerID
+  where matchTalker :: B.ByteString -> TalkerID
         matchTalker sp = case sp of
           "AB" -> AB
           "AD" -> AD
@@ -80,15 +72,16 @@ decodeChannel =
 
 decodeContent :: Parser AISContent
 decodeContent = do
-  t <- takeTill $ (==) ','
-  let v = ord . d6 $ head t
+  t <- takeTill $ (==) $ ch ','
+  let v = d6 $ B.head t
   if v == 1 || v == 2 || v == 3
-     then PosClassA <$> decodePosClassA v
-     else return $ Raw $ decodeSixBits t
+     then PosClassA <$> decodePosClassA (fromEnum v)
+     else return $ Raw $ decodeAscii t
 
 decodePosClassA :: Int -> Parser PositionReportClassA
 decodePosClassA v = do
-  return $ PRCA 
+  -- [2, 30, 4, 8, 10, 1, 28, 27, 12, 9 6, 2, 3, 1, 19]
+  return $ PRCA
     { type' = v
     , repeat = 0
     , mmsi = 0
@@ -104,8 +97,9 @@ decodePosClassA v = do
     , maneuver = (ManeuverIndicator 0)
     , raim = False
     , radio = 0
-   } 
+    }
 
-checksum :: Text -> Int
-checksum = foldl (\i c -> ord c `xor` i ) 0
+checksum :: B.ByteString -> Int
+checksum = B.foldl (\i c -> fromEnum c `xor` i) 0
+{-# INLINE checksum #-}
 
