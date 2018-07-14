@@ -1,23 +1,24 @@
 {-# OPTIONS_HADDOCK show-extensions #-}
 {-|
-Description : TODO
 Copyright   : (c) Archibald Neil MacDonald 2018
 Maintainer  : FortOyer@hotmail.co.uk
 Stability   : experimental
 Portability : POSIX
+
+This is a very simple parec-like parser for extracting arbitrary-length fields
+from a long stream of bits. Fields can be extracted and converted into
+signed/unsigned integers, booleans, strings and floats that conform to the AIS
+sixbit format.
+
 -}
 module NMEA.AIS.Internal.Parse.BitsTraverse 
   ( BitStream
-  , toWords
-  , toBits
-  -- * Monadic
+  -- * BitTraverse
   , BitsTraverse
-  -- ** Parse
   , parseBits
-  , parseBits'
-  , parseBitsPartial
-  , parseBitsPartial'
-  -- ** Grabs
+  -- $bitsTraverse
+  , Result (..)
+  -- * Grabs
   , grabSignedBE
   , grabUnsignedBE
   , grabSignedLE
@@ -32,6 +33,8 @@ module NMEA.AIS.Internal.Parse.BitsTraverse
   , toSignedBE
   , toSignedLE
   , toString
+  , toWords
+  , toBits
   ) where
 
 import qualified Data.ByteString as B
@@ -45,9 +48,12 @@ type BitStream = [Bool]
 grabGeneric :: (BitStream -> a) -- ^ Conversion function
             -> Int -- ^ Size of field to consume.
             -> BitsTraverse a
-grabGeneric f i = BT $ \bs -> let (a, b) = splitAt i bs in (f a, b)
+grabGeneric f i = BT $ \bs -> 
+  if length bs < i 
+     then Partial $ \bs' ->  let (a, b) = splitAt i (bs <> bs') in Done b (f a)
+     else let (a, b) = splitAt i bs in Done b $ f a
 
--- Grabs a signed big-endian integer from the BitStream.
+-- | Grabs a signed big-endian integer from the BitStream.
 grabSignedBE :: Int -- ^ Size of field to consume.
              -> BitsTraverse Int
 grabSignedBE = grabGeneric toSignedLE
@@ -57,22 +63,22 @@ grabSignedLE :: Int -- ^ Size of field to consume.
              -> BitsTraverse Int
 grabSignedLE = grabGeneric toSignedLE
 
--- Grabs an unsigned big-endian integer from the BitStream.
+-- | Grabs an unsigned big-endian integer from the BitStream.
 grabUnsignedBE :: Int -- ^ Size of field to consume.
                -> BitsTraverse Int
 grabUnsignedBE = grabGeneric toUnsignedBE
 
--- Grabs an unsigned little-endian integer from the BitStream.
+-- | Grabs an unsigned little-endian integer from the BitStream.
 grabUnsignedLE :: Int -- ^ Size of field to consume.
                -> BitsTraverse Int
 grabUnsignedLE = grabGeneric toUnsignedLE
 
--- Grabs a float from the BitStream.
+-- | Grabs a float from the BitStream.
 grabFloat :: Int -- ^ Size of field to consume.
           -> BitsTraverse Float
 grabFloat = undefined --grabGeneric toFloat
 
--- Grabs a sixbit encoded string from the BitStream.
+-- | Grabs a sixbit encoded string from the BitStream.
 grabString :: Int -- ^ Size of field to consume.
            -> BitsTraverse B.ByteString
 grabString = grabGeneric toString
@@ -84,7 +90,7 @@ grabBool = grabGeneric head 1
 -- | Skips a section of BitStream.
 skip :: Int -- ^ Size of field to consume.
      -> BitsTraverse ()
-skip i = BT $ \(bs) -> ((), drop i bs)
+skip = grabGeneric $ const ()
 
 -- | Converts a BitStream into an unsigned big-endian number.
 toUnsignedBE :: Bits a => BitStream -> a
@@ -160,37 +166,90 @@ toWords (a:b:c:d:e:f:g:h:ss) = (apB a 7 .|. apB b 6 .|. apB c 5 .|. apB d 4 .|.
 apB :: Bool -> Int -> Word8
 apB b i = if b then bit i else zeroBits
 
-parseBits' :: BitsTraverse a -> BitStream -> a
-parseBits' b a = fst $ parseB b a
+-- $bitsTraverse
+--
+-- An example parser:
+--
+-- @
+--    m :: BitsTraverse (Bool, Int)
+--    m = do
+--      b <- grabBool
+--      i <- grabUnsignedBE 4 
+--      return (b, i)
+--
+--    r = parseBits' m [True, False, True, True, True] 
+-- @
+--
+-- @r@ is @Done [] (True, 14)@. The first argument of Done is the
+-- unconsumed input (none), and the second is the result of the computation.
+--
+-- In cases where not enough input is passed to the parser, the parser will
+-- return a partial result object which can be fed with additional input to get
+-- the final output. An example parser:
+--
+-- @
+--    m :: BitsTraverse (Bool, Int)
+--    m = do
+--      b <- grabBool
+--      i <- grabUnsignedBE 4 
+--      return (b, i)
+--
+--    p = parseBits' m [True, False, True, True] 
+--    r = p [True, False, True]
+-- @
+--
+-- @p@ Would be a 'Partial' Result. @r@ would be 
+-- @Done [False, True] (True, 14)@. Note the unconsumed input which was passed.
 
-parseBitsPartial' :: BitsTraverse a -> BitStream -> (a, BitStream)
-parseBitsPartial' = parseB
+-- | Given a BitsTraverseMonad and a stream to consume, returns the result of
+--   the consumed stream.
+--
+--   This is a variant that consumes Bytestrings. Unconsumed output and input
+--   must be divisible by 8.
+parseBits :: BitsTraverse a -- ^ BitsTraverse to consume a stream.
+          -> B.ByteString   -- ^ Stream to consume.
+          -> Result B.ByteString a
+parseBits a b = convertBits $ parseB a $ toBits $ B.unpack b
+  where convertBits (Done bs o) = Done (B.pack $ toWords bs) o
+        convertBits (Partial g) = Partial $ \bs ->
+                                    convertBits $ g $ toBits $ B.unpack bs
 
-parseBits :: BitsTraverse a -> B.ByteString -> a
-parseBits b a = fst $ parseB b (toBits $ B.unpack a)
+-- | Given a BitsTraverseMonad and a stream to consume, returns the result of
+--   the consumed stream. This consumes Bistreams directly.
+--
+--   This is a variant that consumes BitStreams. It is considered faster than
+--   'parseBits''. Uncomsumed output and input can be a multiple of any number.
+parseBits' :: BitsTraverse a -- ^ BitsTraverse to consume a stream.
+           -> BitStream -- ^ Stream to consume.
+           -> Result BitStream a
+parseBits' = parseB
 
-parseBitsPartial :: BitsTraverse a -> B.ByteString -> (a, B.ByteString)
-parseBitsPartial b a = let (o, ss) = parseB b (toBits $ B.unpack a)
-                        in (o, B.pack $ toWords ss)
+-- | The Result generated from a BitsTraverse run.
+data Result i a = Done i a
+                -- ^ Complete output. Unconsumed BitStream and the final state.
+                | Partial (i -> Result i a)
+                  -- ^ Partial output. Feed with additional data to complete.
 
-data Result a = Done ByteString a
-              | Partial (ByteString -> Result a)
+instance Functor (Result i) where
+  fmap f (Done bs a) = Done bs $ f a
+  fmap f (Partial g) = Partial $ \bs -> f <$> g bs
 
 -- | BitsTraversal Monad. This Monad can be used to consume bits from a
 --   BitStream using the grab methods.
-newtype BitsTraverse a = BT { parseB :: BitStream -> (a, BitStream)  }
+newtype BitsTraverse a = BT { parseB :: BitStream -> Result BitStream a }
 
 instance Functor BitsTraverse where
-  fmap f a = BT $ \bs -> let (a', bs') = parseB a bs in (f a', bs')
+  fmap f a = BT $ \bs -> f <$> parseB a bs
 
 instance Applicative BitsTraverse where
-  f <*> a = BT $ \bs ->
-    let (a', bs') = parseB a bs
-        (f', bs'') = parseB f bs'
-     in (f' a', bs'')
+  f <*> a = BT $ \bs -> ppA (parseB f bs) a
+    where ppA (Done bs f) btA = f <$> parseB btA bs 
+          ppA (Partial g) btA = Partial $ \bs -> ppA (g bs) btA
 
-  pure  a = BT $ \bs -> (a, bs)
+  pure a = BT $ \bs -> Done bs a
 
 instance Monad BitsTraverse where
-  a >>= f = BT $ \bs -> let (a', bs') = parseB a bs in parseB (f a') bs'
+  a >>= f = BT $ \bs -> ppA (parseB a bs) f
+    where ppA (Done bs a) f = parseB (f a) bs
+          ppA (Partial b) f = Partial $ \bs -> ppA (b bs) f
 

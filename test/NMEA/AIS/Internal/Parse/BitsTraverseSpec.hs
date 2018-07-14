@@ -12,6 +12,14 @@ import Control.Monad
 main :: IO ()
 main = hspec spec
 
+instance (Show i, Show a) => Show (Result i a) where
+  show (Done bs a) = "Done: " ++ show bs ++ " " ++ show a
+  show _           = "Partially complete solution."
+
+instance (Eq i, Eq a) => Eq (Result i a) where
+  (Done i a) == (Done j b) = i == j && a == b
+  _ == _                   = False
+
 toUnsignedLEI :: BitStream -> Int
 toUnsignedLEI = toUnsignedLE
 
@@ -98,19 +106,19 @@ spec = do
       toWords (replicate 8 True)  `shouldBe` [255]
   describe "BitTraverse Monad" $ do
     it "Should always return given value" $ do
-      32 `shouldBe` parseBits (return 32) ""
-      Just "Hello" `shouldBe` parseBits (return $ Just "Hello") "00"
+      parseBits (return 32) "" `shouldBe` Done "" 32
+      parseBits (return $ Just "Hello") "00" `shouldBe` Done "00" (Just "Hello")
     it "Should extract 1 number" $ do
-      84 `shouldBe` parseBits (grabUnsignedBE 8) "T"
+      parseBits (grabUnsignedBE 8) "T" `shouldBe` Done "" 84
     it "Should extract 2 numbers" $ do
-      (84, 69) `shouldBe`
-        parseBits (
-          do a <- grabUnsignedBE 8
-             b <- grabUnsignedBE 8
-             return (a, b)
-          )
-          "TEAM"
+      parseBits (
+        do a <- grabUnsignedBE 8
+           b <- grabUnsignedBE 8
+           return (a, b)
+        )
+        "TEAM"
+        `shouldBe` Done "AM" (84, 69)
     it "Should extract 4 numbers" $ do
-      -- Note reverse order here.
-      [77, 65, 69, 84] `shouldBe`
-        parseBits (replicateM 4 $ grabUnsignedBE 8) "TEAM"
+      parseBits (replicateM 4 $ grabUnsignedBE 8) "TEAM" `shouldBe`
+        Done "" [84, 69, 65, 77]
+
