@@ -16,6 +16,7 @@ module NMEA.AIS.Internal.Parse.BitsTraverse
   -- * BitTraverse
   , BitsTraverse
   , parseBits
+  , parseBits'
   -- $bitsTraverse
   , Result (..)
   -- * Grabs
@@ -44,14 +45,16 @@ import Data.Word (Word8)
 type BitStream = [Bool]
 
 -- | Internal grab function for common types. Converts a BitStream conversion
---   function into a grab monad.
+--   function into a grab monad. Tests the field size to consume, if there are
+--   not enough bytes this will return a partial result.
 grabGeneric :: (BitStream -> a) -- ^ Conversion function
             -> Int -- ^ Size of field to consume.
             -> BitsTraverse a
-grabGeneric f i = BT $ \bs -> 
-  if length bs < i 
-     then Partial $ \bs' ->  let (a, b) = splitAt i (bs <> bs') in Done b (f a)
-     else let (a, b) = splitAt i bs in Done b $ f a
+grabGeneric f i = BT $ \bs -> toRes bs
+  where toRes xs =
+          if length xs < i
+             then Partial $ \xs' -> toRes (xs <> xs')
+             else let (a, b) = splitAt i xs in Done b $ f a
 
 -- | Grabs a signed big-endian integer from the BitStream.
 grabSignedBE :: Int -- ^ Size of field to consume.
@@ -180,8 +183,8 @@ apB b i = if b then bit i else zeroBits
 --    r = parseBits' m [True, False, True, True, True] 
 -- @
 --
--- @r@ is @Done [] (True, 14)@. The first argument of Done is the
--- unconsumed input (none), and the second is the result of the computation.
+-- @r@ is @Done [] (True, 14)@. The first argument of Done is the unconsumed
+-- input (none), and the second is the result of the computation.
 --
 -- In cases where not enough input is passed to the parser, the parser will
 -- return a partial result object which can be fed with additional input to get
@@ -194,14 +197,14 @@ apB b i = if b then bit i else zeroBits
 --      i <- grabUnsignedBE 4 
 --      return (b, i)
 --
---    p = parseBits' m [True, False, True, True] 
+--    let (Partial p) = parseBits' m [True, False, True, True] 
 --    r = p [True, False, True]
 -- @
 --
 -- @p@ Would be a 'Partial' Result. @r@ would be 
 -- @Done [False, True] (True, 14)@. Note the unconsumed input which was passed.
 
--- | Given a BitsTraverseMonad and a stream to consume, returns the result of
+-- | Given a BitsTraverse Monad and a stream to consume, returns the result of
 --   the consumed stream.
 --
 --   This is a variant that consumes Bytestrings. Unconsumed output and input

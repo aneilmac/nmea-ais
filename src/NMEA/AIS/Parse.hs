@@ -15,6 +15,7 @@ import NMEA.AIS
 import NMEA.AIS.PositionReportClassA
 import NMEA.AIS.Internal.Parse.ByteStringHelpers
 import NMEA.AIS.Internal.Parse.SixBits
+import qualified NMEA.AIS.Internal.Parse.BitsTraverse as A
 
 parseMessage :: Parser [AIS]
 parseMessage = do
@@ -75,29 +76,9 @@ decodeContent = do
   t <- takeTill $ (==) $ ch ','
   let v = d6 $ B.head t
   if v == 1 || v == 2 || v == 3
-     then PosClassA <$> decodePosClassA (fromEnum v)
+     then let (A.Done bs a) = A.parseBits' posClassA (decodeAscii' t)
+           in return $ PosClassA a
      else return $ Raw $ decodeAscii t
-
-decodePosClassA :: Int -> Parser PositionReportClassA
-decodePosClassA v = do
-  -- [2, 30, 4, 8, 10, 1, 28, 27, 12, 9 6, 2, 3, 1, 19]
-  return $ PRCA
-    { type' = v
-    , repeat = 0
-    , mmsi = 0
-    , status = UNDER_WAY
-    , turn = 0
-    , speed = Nothing
-    , accuracy = False
-    , lon = 0
-    , lat = 0
-    , course = Nothing
-    , heading = 0
-    , second = Nothing
-    , maneuver = (ManeuverIndicator 0)
-    , raim = False
-    , radio = 0
-    }
 
 checksum :: B.ByteString -> Int
 checksum = B.foldl (\i c -> fromEnum c `xor` i) 0
